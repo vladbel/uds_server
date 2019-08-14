@@ -3,10 +3,12 @@ use std::os::unix::net::{UnixStream,UnixListener};
 use std::thread;
 
 fn handle_client(stream: UnixStream) {
-    let stream = BufReader::new(stream);
-    for line in stream.lines() {
+    let buffer_reader = BufReader::new(stream);
+    for line in buffer_reader.lines() {
         println!("{}", line.unwrap());
     }
+
+    println!("handle_client exit");
 }
 
 fn main() {
