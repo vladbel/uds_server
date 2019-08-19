@@ -1,8 +1,10 @@
-use std::io::{BufRead, BufReader, BufWriter};
+use std::io::{BufRead, BufReader, BufWriter, Write};
 use std::os::unix::net::{UnixStream,UnixListener};
 use std::thread;
 
-fn read_client(buffer_reader: BufReader<UnixStream>) {
+
+fn read_client(stream: UnixStream) {
+    let buffer_reader = BufReader::new(stream);
     for line in buffer_reader.lines() {
         println!("{}", line.unwrap());
     }
@@ -10,11 +12,24 @@ fn read_client(buffer_reader: BufReader<UnixStream>) {
     println!("buffer exit");
 }
 
-fn send_to_client() {
+fn send_to_clients(stream: UnixStream) {
     let mut input = String::new();
-    std::io::stdin().read_line(&mut input);
-    //buffer_writer.write(input.unwrap());
-    println!("send to client {}", input);
+    let mut input_length = 0;
+    let mut buffer_writer = BufWriter::new(stream);
+    while input_length < 3 {
+        match std::io::stdin().read_line(&mut input) {
+            Ok(input) => {
+                println!("Input: {}", input);
+                input_length = input_length + 1;
+                buffer_writer.write(b"from server to clients").unwrap();
+                buffer_writer.flush().unwrap();
+            }
+            Err(err) => {
+                    println!("Error: {}", err);
+                    break;
+            }
+        }
+    }
 }
 
 fn main() {
@@ -23,11 +38,12 @@ fn main() {
     for stream in listener.incoming() {
         match stream {
             Ok(stream) => {
-                let buffer_reader = BufReader::new(stream);
-                thread::spawn(|| read_client(buffer_reader));
+                println!("New incoming stream");
+                let stream1 = stream.try_clone().unwrap();
 
-                //let buffer_writer = BufWriter::new(stream);
-                thread::spawn(|| send_to_client());
+                thread::spawn(|| send_to_clients(stream1));
+                thread::spawn(|| read_client(stream));
+
             }
             Err(err) => {
                 println!("Error: {}", err);
