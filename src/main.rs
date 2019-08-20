@@ -12,16 +12,20 @@ fn read_client(stream: UnixStream) {
     println!("buffer exit");
 }
 
-fn send_to_clients(stream: UnixStream) {
-    let mut input = String::new();
-    let mut input_length = 0;
-    let mut buffer_writer = BufWriter::new(stream);
-    while input_length < 3 {
+fn send_to_clients(target_stream: UnixStream) {
+    
+    let mut buffer_writer = BufWriter::new(target_stream);
+    let mut read_input = true;
+    while read_input {
+        let mut input = String::new();
         match std::io::stdin().read_line(&mut input) {
-            Ok(input) => {
+            Ok(input_length) => {
                 println!("Input: {}", input);
-                input_length = input_length + 1;
-                buffer_writer.write(b"from server to clients").unwrap();
+                println!("Input length: {}", input_length);
+                if input == "exit" {
+                    read_input = false;
+                }
+                buffer_writer.write(input.as_bytes()).unwrap();
                 buffer_writer.flush().unwrap();
             }
             Err(err) => {
@@ -30,6 +34,7 @@ fn send_to_clients(stream: UnixStream) {
             }
         }
     }
+    println!("Exit reading consiole input");
 }
 
 fn main() {
@@ -38,6 +43,8 @@ fn main() {
     for stream in listener.incoming() {
         match stream {
             Ok(stream) => {
+                //let connection_count = listener.incoming().count();
+                //println!("Connections: {}", connection_count);
                 println!("New incoming stream");
                 let stream1 = stream.try_clone().unwrap();
 
