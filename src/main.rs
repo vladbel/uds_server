@@ -43,8 +43,6 @@ fn main() {
     for stream in listener.incoming() {
         match stream {
             Ok(stream) => {
-                //let connection_count = listener.incoming().count();
-                //println!("Connections: {}", connection_count);
                 println!("New incoming stream");
                 let stream1 = stream.try_clone().unwrap();
 
