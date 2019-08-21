@@ -13,7 +13,7 @@ fn read_from_client(stream: UnixStream) {
     println!("buffer exit");
 }
 
-fn read_stdin (message: &mut std::string::String) {
+fn read_stdin (arc_mutex: Arc<Mutex<String>>) {
 
     let mut read_input = true;
     while read_input {
@@ -25,6 +25,7 @@ fn read_stdin (message: &mut std::string::String) {
                 if input == "exit\n" {
                     read_input = false;
                 }
+                let mut message = arc_mutex.lock().unwrap();
                 *message = input;
             }
             Err(err) => {
@@ -63,21 +64,29 @@ fn send_to_client(target_stream: UnixStream) {
 
 fn main() {
     let listener = UnixListener::bind("/tmp/rust_ipc_socket").unwrap();
-    
+
     let arc_message = Arc::new(Mutex::new(<String>::new()));
 
      
-    let arc_message_ref =Arc::clone(&arc_message);
+    let arc_message_ref = Arc::clone(&arc_message);
     thread::spawn(move || {
-        let mut local_message = arc_message_ref.lock().unwrap();
-        read_stdin( &mut local_message);
+        read_stdin( arc_message_ref );
     });
 
     let arc_message_ref_2 =Arc::clone(&arc_message);
+
     thread::spawn(move || {
-        println!("Trying to aquire Mutex on messge");
-        let local_message = arc_message_ref_2.lock().unwrap();
-        println!("Message = {}", local_message);
+        let mut handled_message = String::new();
+        loop {
+            println!("Read shared resource: trying to aquire Mutex on messge");
+            
+            let local_message = arc_message_ref_2.lock().unwrap();
+            if *local_message != handled_message {
+                handled_message = local_message.clone();
+                println!("Message = {}", local_message);
+            }
+            std::thread::sleep(std::time::Duration::new(2, 0));
+        }
     });
 
 
