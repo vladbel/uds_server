@@ -1,5 +1,5 @@
 use std::io::{BufRead, BufReader, BufWriter, Write};
-use std::os::unix::net::{UnixStream};
+use std::os::unix::net::{UnixListener, UnixStream};
 use std::thread;
 use std::sync::{Arc, Mutex};
 use std::env;
@@ -98,9 +98,13 @@ fn main() {
         }
     }
 
+    // init cross-thread message bus
+    // currently just a string
+
     let arc_message = Arc::new(Mutex::new(<String>::new()));
     let arc_message_ref = Arc::clone(&arc_message);
 
+    // read user input
     let user_input_thread = thread::spawn(move || {
         read_stdin( arc_message_ref );
     });
@@ -124,6 +128,27 @@ fn main() {
                 }
             }
             EndPointType::UdsServer => {
+                    // will block the thread
+                    // should be moved from main thread
+                    let listener = UnixListener::bind(end_point.address).unwrap();
+                    for stream in listener.incoming() {
+                        match stream {
+                            Ok(stream) => {
+                                client_num = client_num + 1;
+                                println!("New incoming stream.");
+                                let stream1 = stream.try_clone().unwrap();
+                                let arc_message_ref_3 =Arc::clone(&arc_message);
+                                thread::spawn(move || write_stream(client_num, stream1, arc_message_ref_3));
+
+                                thread::spawn(move || read_stream(client_num, stream));
+
+                            }
+                            Err(err) => {
+                                println!("Error: {}", err);
+                                break;
+                            }
+                        }
+                    }
             }
         }
     }
