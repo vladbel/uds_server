@@ -4,12 +4,24 @@
     // For more information, visit: https://go.microsoft.com/fwlink/?linkid=830387
     "version": "0.2.0",
     "configurations": [
+
         {
             "type": "lldb",
             "request": "launch",
             "name": "dbg_ipc_socket_client",
             "program": "${workspaceFolder}/target/debug/ipc_socket_client",
-            "args": [],
+            "args": ["--uds_client", "/tmp/zipgateway.socket"],
+            "cwd": "${workspaceFolder}",
+            "sourceLanguages": [
+                "rust"
+            ]
+        },
+        {
+            "type": "lldb",
+            "request": "launch",
+            "name": "dbg_ipc_socket_server",
+            "program": "${workspaceFolder}/target/debug/ipc_socket_client",
+            "args": ["--uds_server", "/tmp/zipgateway.socket"],
             "cwd": "${workspaceFolder}",
             "sourceLanguages": [
                 "rust"
