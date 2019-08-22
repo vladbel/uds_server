@@ -4,10 +4,10 @@ use std::thread;
 use std::sync::{Arc, Mutex};
 
 
-fn read_from_client(stream: UnixStream) {
+fn read_from_client(id: u8, stream: UnixStream) {
     let buffer_reader = BufReader::new(stream);
     for line in buffer_reader.lines() {
-        println!("{}", line.unwrap());
+        println!("From {}: {}", id, line.unwrap());
     }
 
     println!("buffer exit");
@@ -37,28 +37,27 @@ fn read_stdin (arc_mutex: Arc<Mutex<String>>) {
     println!("Exit reading consiole input");
 }
 
-fn send_to_client(target_stream: UnixStream) {
+fn send_to_client(id: u8,
+                  target_stream: UnixStream,
+                  arc_mutex: Arc<Mutex<String>>) {
     
     let mut buffer_writer = BufWriter::new(target_stream);
-    let mut read_input = true;
-    while read_input {
-        let mut input = String::new();
-        match std::io::stdin().read_line(&mut input) {
-            Ok(input_length) => {
-                println!("Input: {}", input);
-                println!("Input length: {}", input_length);
-                if input == "exit" {
-                    read_input = false;
-                }
-                buffer_writer.write(input.as_bytes()).unwrap();
-                buffer_writer.flush().unwrap();
-            }
-            Err(err) => {
-                    println!("Error: {}", err);
-                    break;
+    let mut handled_message = String::new();
+
+    loop {
+        std::thread::sleep(std::time::Duration::new(2, 0));
+        let local_message = arc_mutex.lock().unwrap();
+        if *local_message != handled_message {
+            handled_message = local_message.clone();
+            println!("Send to {} new message = {}", id, local_message);
+            buffer_writer.write(handled_message .as_bytes()).unwrap();
+            buffer_writer.flush().unwrap();
+            if handled_message == "exit\n" {
+                break;
             }
         }
     }
+
     println!("Exit reading consiole input");
 }
 
@@ -78,27 +77,27 @@ fn main() {
     thread::spawn(move || {
         let mut handled_message = String::new();
         loop {
-            println!("Read shared resource: trying to aquire Mutex on messge");
-            
+            std::thread::sleep(std::time::Duration::new(2, 0));
+            //println!("Read shared resource: trying to aquire Mutex on messge");
             let local_message = arc_message_ref_2.lock().unwrap();
             if *local_message != handled_message {
                 handled_message = local_message.clone();
-                println!("Message = {}", local_message);
+                println!("new message = {}", local_message);
             }
-            std::thread::sleep(std::time::Duration::new(2, 0));
         }
     });
 
-
+    let mut client_num: u8 = 0;
     for stream in listener.incoming() {
         match stream {
             Ok(stream) => {
+                client_num = client_num + 1;
                 println!("New incoming stream");
                 let stream1 = stream.try_clone().unwrap();
+                let arc_message_ref_3 =Arc::clone(&arc_message);
+                thread::spawn(move || send_to_client(client_num, stream1, arc_message_ref_3));
 
-                thread::spawn(move || send_to_client(stream1));
-
-                thread::spawn(move || read_from_client(stream));
+                thread::spawn(move || read_from_client(client_num, stream));
 
             }
             Err(err) => {
