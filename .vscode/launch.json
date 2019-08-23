@@ -26,6 +26,17 @@
             "sourceLanguages": [
                 "rust"
             ]
+        },
+        {
+            "type": "lldb",
+            "request": "launch",
+            "name": "test_args",
+            "program": "${workspaceFolder}/target/debug/ipc_socket_client",
+            "args": ["--uds_server", "{\"address\":\"/tmp/zipgateway.socket\",\"id\":\"blah\",\"targets\":[1,2,3]}"],
+            "cwd": "${workspaceFolder}",
+            "sourceLanguages": [
+                "rust"
+            ]
         }
     ]
 }

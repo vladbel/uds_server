@@ -4,6 +4,8 @@ use std::thread;
 use std::sync::{Arc, Mutex};
 use std::env;
 use std::convert::AsRef;
+use std::sync::mpsc::channel;
+use serde_json::{Result, Value};
 
 
 fn read_stream(id: u8, stream: UnixStream) {
@@ -40,14 +42,15 @@ fn read_stdin (arc_mutex: Arc<Mutex<String>>) {
 }
 
 fn write_stream(id: u8,
-                  target_stream: UnixStream,
-                  arc_mutex: Arc<Mutex<String>>) {
+                target_stream: UnixStream,
+                arc_mutex: Arc<Mutex<String>>) {
 
     let mut buffer_writer = BufWriter::new(target_stream);
     let mut handled_message = String::new();
 
     loop {
         std::thread::sleep(std::time::Duration::new(1, 0));
+
         let local_message = arc_mutex.lock().unwrap();
         if *local_message != handled_message {
             handled_message = local_message.clone();
@@ -64,6 +67,7 @@ fn write_stream(id: u8,
 
 
 enum EndPointType {
+    None,
     UdsServer,
     UdsClient
 }
@@ -77,29 +81,80 @@ fn main() {
     let mut end_points = Vec::<EndPointConfiguration>::new();
 
     for (i, arg) in args.iter().enumerate() {
+        let mut end_point_type: EndPointType = EndPointType::None;
         match arg.as_ref() {
             "--uds_client" => {
-                if i + 1 < args.len() {
-                    let copy = args[i + 1].clone();
-                    end_points.push ( EndPointConfiguration{end_point_type: EndPointType::UdsClient,
-                                                        address: copy});
-                }
+                end_point_type = EndPointType::UdsClient;
             }
             "--uds_server" => {
-                if i + 1 < args.len() {
-                    let copy = args[i + 1].clone();
-                    end_points.push ( EndPointConfiguration{end_point_type: EndPointType::UdsServer,
-                                                        address: copy});
-                }
+                end_point_type = EndPointType::UdsServer;
             }
             _ => {
                 // Noop
             }
         }
+
+        match end_point_type {
+            EndPointType::None => {
+                // Noop
+            }
+            _ => {
+                if i + 1 < args.len() {
+                    let copy = args[i + 1].clone();
+                    let v: Value = serde_json::from_str(&copy).unwrap();
+                    let address = v["address"].to_string();
+                    //let targets = &v["targets"];
+                    let id = v["id"].to_string();
+                    end_points.push ( EndPointConfiguration{end_point_type: end_point_type,
+                                                            address: address});
+                }
+            }
+        }
+
+
     }
 
+    return;
     // init cross-thread message bus
     // currently just a string
+
+    let (tx, rx) = channel();
+
+    let tx1 = tx.clone();
+    thread::spawn(move|| {
+        loop{
+            std::thread::sleep(std::time::Duration::new(1, 0));
+            tx1.send("blah").unwrap();
+        }
+    });
+
+    let tx2 = tx.clone();
+    thread::spawn(move|| {
+        loop {
+            std::thread::sleep(std::time::Duration::new(1, 0));
+            tx2.send("blah-blah").unwrap();
+        }
+
+    });
+
+    thread::spawn(move|| {
+        loop {
+            std::thread::sleep(std::time::Duration::new(1, 0));
+            tx.send("blaha-muha-ha-ha-ha").unwrap();
+        }
+        
+    });
+
+    thread::spawn(move|| {
+        loop {
+            let recieved = rx.recv().unwrap();
+            println!("Recieved: {}", recieved);
+        }
+
+    });
+
+
+
 
     let arc_message = Arc::new(Mutex::new(<String>::new()));
     let arc_message_ref = Arc::clone(&arc_message);
@@ -149,6 +204,9 @@ fn main() {
                             }
                         }
                     }
+            }
+            _ => {
+                // NoOp
             }
         }
     }
