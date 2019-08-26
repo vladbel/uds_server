@@ -1,23 +1,24 @@
 use std::io::{BufRead, BufReader, BufWriter, Write};
 use std::os::unix::net::{UnixListener, UnixStream};
 use std::thread;
-use std::sync::{Arc, Mutex};
+//use std::sync::{Arc, Mutex};
 use std::env;
 use std::convert::AsRef;
 use std::sync::mpsc::channel;
-use serde_json::{Result, Value};
+use std::sync::mpsc::{Sender, Receiver};
 
-
-fn read_stream(id: u8, stream: UnixStream) {
+fn read_stream(stream: UnixStream, tx: Sender<String>) {
     let buffer_reader = BufReader::new(stream);
     for line in buffer_reader.lines() {
-        println!("From {}: {}", id, line.unwrap());
+        let data_to_send = line.unwrap();
+        println!("Recieved: {}", data_to_send);
+        tx.send(data_to_send).unwrap();
     }
 
     println!("buffer exit");
 }
 
-fn read_stdin (arc_mutex: Arc<Mutex<String>>) {
+fn read_stdin (tx: Sender<String>) {
 
     let mut read_input = true;
     while read_input {
@@ -29,8 +30,7 @@ fn read_stdin (arc_mutex: Arc<Mutex<String>>) {
                 if input == "exit\n" {
                     read_input = false;
                 }
-                let mut message = arc_mutex.lock().unwrap();
-                *message = input;
+                tx.send(input).unwrap();
             }
             Err(err) => {
                     println!("Error: {}", err);
@@ -41,44 +41,48 @@ fn read_stdin (arc_mutex: Arc<Mutex<String>>) {
     println!("Exit reading consiole input");
 }
 
-fn write_stream(id: u8,
-                target_stream: UnixStream,
-                arc_mutex: Arc<Mutex<String>>) {
+fn write_stream(rx: Receiver<String>, 
+                target_stream: UnixStream) {
 
     let mut buffer_writer = BufWriter::new(target_stream);
-    let mut handled_message = String::new();
 
     loop {
-        std::thread::sleep(std::time::Duration::new(1, 0));
-
-        let local_message = arc_mutex.lock().unwrap();
-        if *local_message != handled_message {
-            handled_message = local_message.clone();
-            println!("Send to {} new message = {}", id, local_message);
-            buffer_writer.write(handled_message .as_bytes()).unwrap();
-            buffer_writer.flush().unwrap();
-            if handled_message == "exit\n" {
-                break;
-            }
-        }
+        let message = rx.recv().unwrap();
+        println!("Send new message = {}", message);
+        buffer_writer.write(message .as_bytes()).unwrap();
+        buffer_writer.flush().unwrap();
     }
-    println!("Exit reading consiole input");
 }
 
 
 enum EndPointType {
     None,
     UdsServer,
-    UdsClient
+    UdsClient,
+    Stdio
 }
+
 struct EndPointConfiguration {
     end_point_type: EndPointType,
     address: String
 }
 
+struct SendTargetChannel{
+    tx: std::sync::mpsc::Sender<String>,
+    id: u8
+}
+
+const ID_ZIPGATEWAY: u8 = 10;
+const ID_HUBCORE: u8 = 12;
+const ID_STDIO: u8 = 14;
+
+
+
 fn main() {
     let args: Vec<String> = env::args().collect();
-    let mut end_points = Vec::<EndPointConfiguration>::new();
+
+    let mut zipgateway_client = EndPointConfiguration{ end_point_type: EndPointType::None, address: "".to_string()};
+    let mut hub_core_server = EndPointConfiguration{ end_point_type: EndPointType::None, address: "".to_string()};
 
     for (i, arg) in args.iter().enumerate() {
         let mut end_point_type: EndPointType = EndPointType::None;
@@ -93,121 +97,103 @@ fn main() {
                 // Noop
             }
         }
-
         match end_point_type {
-            EndPointType::None => {
-                // Noop
-            }
-            _ => {
-                if i + 1 < args.len() {
-                    let copy = args[i + 1].clone();
-                    let v: Value = serde_json::from_str(&copy).unwrap();
-                    let address = v["address"].to_string();
-                    //let targets = &v["targets"];
-                    let id = v["id"].to_string();
-                    end_points.push ( EndPointConfiguration{end_point_type: end_point_type,
-                                                            address: address});
+            EndPointType::UdsClient => {
+                zipgateway_client = EndPointConfiguration{
+                    address: args[i+1].clone(),
+                    end_point_type: end_point_type
                 }
             }
-        }
+            EndPointType::UdsServer => {
+                    hub_core_server = EndPointConfiguration{
+                    address: args[i+1].clone(),
+                    end_point_type: end_point_type
+                }
+            }
+            _ => {
 
+            }
+        }
 
     }
 
-    return;
-    // init cross-thread message bus
-    // currently just a string
+    let (tx_zipgateway, rx_zipgateway) = channel();
+    let (tx_hubcore, rx_hubcore) = channel();
+    let (tx_stdio, rx_stdio) = channel();
+    let (tx_brocker, rx_brocker) = channel();
 
-    let (tx, rx) = channel();
+    // init brocker TX channels
+    let mut brocker_tx_channels = Vec::<SendTargetChannel>::new();
+    brocker_tx_channels.push( SendTargetChannel{id: ID_ZIPGATEWAY, tx: tx_zipgateway.clone()});
+    brocker_tx_channels.push( SendTargetChannel{id: ID_HUBCORE, tx: tx_hubcore.clone()});
+    brocker_tx_channels.push( SendTargetChannel{id: ID_STDIO, tx: tx_stdio.clone()});
 
-    let tx1 = tx.clone();
-    thread::spawn(move|| {
-        loop{
-            std::thread::sleep(std::time::Duration::new(1, 0));
-            tx1.send("blah").unwrap();
-        }
-    });
-
-    let tx2 = tx.clone();
-    thread::spawn(move|| {
-        loop {
-            std::thread::sleep(std::time::Duration::new(1, 0));
-            tx2.send("blah-blah").unwrap();
-        }
-
-    });
-
-    thread::spawn(move|| {
-        loop {
-            std::thread::sleep(std::time::Duration::new(1, 0));
-            tx.send("blaha-muha-ha-ha-ha").unwrap();
-        }
-        
-    });
-
-    thread::spawn(move|| {
-        loop {
-            let recieved = rx.recv().unwrap();
-            println!("Recieved: {}", recieved);
-        }
-
-    });
-
-
-
-
-    let arc_message = Arc::new(Mutex::new(<String>::new()));
-    let arc_message_ref = Arc::clone(&arc_message);
-
-    // read user input
+        // read user input
+    let tx_brocker_clone_1 = tx_brocker.clone();
     let user_input_thread = thread::spawn(move || {
-        read_stdin( arc_message_ref );
+        read_stdin(tx_brocker_clone_1);
     });
 
-    let mut client_num: u8 = 0;
 
-    for end_point in end_points {
-        match end_point.end_point_type {
-            EndPointType::UdsClient => {
-                match UnixStream::connect(end_point.address) {
+    // brocker
+    thread::spawn(move|| {
+        loop {
+            let recieved = rx_brocker.recv().unwrap();
+            println!("Recieved: {}", recieved);
+            for target in &brocker_tx_channels {
+                target.tx.send(recieved.clone()).unwrap();
+            }
+        }
+    });
+
+     // Zip Gateway end point
+    match zipgateway_client.end_point_type
+    {
+        EndPointType::UdsClient => {
+            match UnixStream::connect(zipgateway_client.address) {
+                Ok(stream) => {
+                    let tx_brocker_clone_2 = tx_brocker.clone();
+                    let stream_clone = stream.try_clone().unwrap();
+                    thread::spawn(move || write_stream(rx_zipgateway, stream_clone));
+                    thread::spawn(move || read_stream(stream, tx_brocker_clone_2));
+                }
+                Err(err) => {
+                    println!("Error: {}", err);
+                }
+            }
+        }
+        _ => {
+            // noop
+        }
+    }
+
+    // will block the thread
+    // should be moved from main thread
+    match hub_core_server.end_point_type {
+        EndPointType::UdsServer => {
+            let listener = UnixListener::bind(hub_core_server.address).unwrap();
+            for stream in listener.incoming() {
+                match stream {
+                    // Hub core end point
                     Ok(stream) => {
-                        client_num = client_num + 1;
-                        let stream1 = stream.try_clone().unwrap();
-                        let arc_message_ref_3 =Arc::clone(&arc_message);
-                        thread::spawn(move || write_stream(client_num, stream1, arc_message_ref_3));
-                        thread::spawn(move || read_stream(client_num, stream));
+                        println!("New incoming stream.");
+
+                        let tx_brocker_clone_3 = tx_brocker.clone();
+
+                        // TODO: 
+                        // let stream1 = stream.try_clone().unwrap();
+                        // thread::spawn(move || write_stream(rx_hubcore, stream1));
+
+                        thread::spawn(move || read_stream(stream, tx_brocker_clone_3));
                     }
                     Err(err) => {
                         println!("Error: {}", err);
                     }
                 }
             }
-            EndPointType::UdsServer => {
-                    // will block the thread
-                    // should be moved from main thread
-                    let listener = UnixListener::bind(end_point.address).unwrap();
-                    for stream in listener.incoming() {
-                        match stream {
-                            Ok(stream) => {
-                                client_num = client_num + 1;
-                                println!("New incoming stream.");
-                                let stream1 = stream.try_clone().unwrap();
-                                let arc_message_ref_3 =Arc::clone(&arc_message);
-                                thread::spawn(move || write_stream(client_num, stream1, arc_message_ref_3));
-
-                                thread::spawn(move || read_stream(client_num, stream));
-
-                            }
-                            Err(err) => {
-                                println!("Error: {}", err);
-                                break;
-                            }
-                        }
-                    }
-            }
-            _ => {
-                // NoOp
-            }
+        }
+        _ => {
+            // no op
         }
     }
 

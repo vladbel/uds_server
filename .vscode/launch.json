@@ -21,7 +21,7 @@
             "request": "launch",
             "name": "dbg_ipc_socket_server",
             "program": "${workspaceFolder}/target/debug/ipc_socket_client",
-            "args": ["--uds_server", "/tmp/zipgateway.socket"],
+            "args": ["--uds_server", "/tmp/hubcore.socket"],
             "cwd": "${workspaceFolder}",
             "sourceLanguages": [
                 "rust"
