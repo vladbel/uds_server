@@ -30,9 +30,9 @@
         {
             "type": "lldb",
             "request": "launch",
-            "name": "test_args",
+            "name": "dbg_clnt_svr",
             "program": "${workspaceFolder}/target/debug/ipc_socket_client",
-            "args": ["--uds_server", "{\"address\":\"/tmp/zipgateway.socket\",\"id\":\"blah\",\"targets\":[1,2,3]}"],
+            "args": ["--uds_client", "/tmp/zipgateway.socket", "--uds_server", "/tmp/hubcore.socket"],
             "cwd": "${workspaceFolder}",
             "sourceLanguages": [
                 "rust"
