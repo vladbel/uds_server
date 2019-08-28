@@ -1,4 +1,4 @@
-use std::io::{BufRead, BufReader, BufWriter, Write};
+use std::io::{BufReader, BufWriter, Write, Read};
 use std::os::unix::net::{UnixListener, UnixStream};
 use std::thread;
 //use std::sync::{Arc, Mutex};
@@ -8,28 +8,59 @@ use std::sync::mpsc::channel;
 use std::sync::mpsc::{Sender, Receiver};
 
 fn read_stream(id: u8, stream: UnixStream, tx: Sender<ChannelMessage>) {
-    let buffer_reader = BufReader::new(stream);
+    let mut buffer_reader = BufReader::new(stream);
+    loop {
+        let mut buffer: [u8; 8] = [0; 8];
+        match buffer_reader.read(&mut buffer) {
+            Ok(bytes_received) => {
+                println! ("DEBUG: read_stream(): -- {} -- bytes received.", bytes_received);
 
-    for line in buffer_reader.lines() {
-        let data_to_send = line.unwrap();
-        let message = ChannelMessage { sender_id: id, text: data_to_send };
-        tx.send(message).unwrap();
+                // publish received data
+                let text_to_send = format!("{} bytes recieved: {:X?}", bytes_received, &buffer[0 .. bytes_received]);
+                let mut subscribers = Vec::<u8>::new();
+                subscribers.push(ID_ALL);
+                let message = ChannelMessage { 
+                    sender_id: id, 
+                    text: text_to_send , 
+                    data: buffer[0 .. (bytes_received)].to_vec(), 
+                    subscribers: subscribers};
+                tx.send(message).unwrap();
+            }
+            Err(err) => {
+                println! ("ERROR: read_stream(): error reading stream {}.", err);
+            }
+        }
     }
 }
 
 fn read_stdin (id: u8, tx: Sender<ChannelMessage>) {
 
-    let mut read_input = true;
-    while read_input {
+    loop {
         let mut input = String::new();
         match std::io::stdin().read_line(&mut input) {
             Ok(input_length) => {
                 println!("Input: {}", input);
                 println!("Input length: {}", input_length);
-                if input == "exit\n" {
-                    read_input = false;
+
+                let mut data = Vec::<u8>::new();
+                let mut subscribers = Vec::<u8>::new();
+                match input.as_ref() {
+                    "exit\n" => {
+                        break;
+                    }
+                    "get_zipgateway_version\n" => {
+                        data.push(0x01); 
+                        subscribers.push(ID_ZIPGATEWAY);
+                    }
+                    _ => {
+                        // noop
+                        data = (&input.as_bytes()).to_vec();
+                        subscribers.push(ID_ALL);
+                    }
                 }
-                let message = ChannelMessage { sender_id: id, text: input };
+
+
+                let message = ChannelMessage { sender_id: id, text: input, data: data, subscribers: subscribers};
                 tx.send(message).unwrap();
             }
             Err(err) => {
@@ -48,10 +79,7 @@ fn write_stream(rx: Receiver<ChannelMessage>,
 
     loop {
         let message = rx.recv().unwrap();
-        buffer_writer.write("//text start\n" .as_bytes()).unwrap();
-        buffer_writer.write(message.text .as_bytes()).unwrap();
-        buffer_writer.write("//text end\n" .as_bytes()).unwrap();
-
+        buffer_writer.write(&message.data).unwrap();
         buffer_writer.flush().unwrap();
     }
 }
@@ -76,7 +104,7 @@ struct EndPointConfiguration {
 struct ChannelMessage {
     sender_id: u8,
     subscribers: Vec<u8>,
-    //raw_data: Vec::<u8>,
+    data: Vec::<u8>,
     text: String
 }
 
@@ -84,18 +112,22 @@ impl ChannelMessage {
     fn clone(&self) -> ChannelMessage {
         return ChannelMessage { 
             sender_id: self.sender_id, 
-            subscribers: self.subscribers.clone(), 
-            text: self.text.clone()
+            data: self.data.clone(),
+            text: self.text.clone(),
+            subscribers: self.subscribers.clone()
         };
     }
 
+    /*
     fn is_subscribed( &self, subscriber_id: u8) -> bool {
-        let i = self.subscribers.enumerate()
-            .find(|&r| {
-                (r == subscriber_id) | (r == ID_ALL);
-            }.unwrap().0
+        let i = self.subscribers.clone().into_iter().find(|&r| {
+                (r == subscriber_id) | (r == ID_ALL)
+            }).unwrap();
+
         return i >= 0;
     }
+    */
+
 }
 
 //  Subscriber channel
@@ -152,7 +184,7 @@ fn main() {
 
     }
 
-        // init brocker TX channels
+    // init brocker TX channels
     let mut brocker_tx_channels = Vec::<SubscriberChannel>::new();
     let (tx_brocker, rx_brocker) = channel();
 
@@ -194,9 +226,7 @@ fn main() {
     //
 
     let (tx_zipgateway, rx_zipgateway) = channel();
-    
     let (tx_stdio, rx_stdio) = channel();
-
 
     brocker_tx_channels.push( SubscriberChannel{id: ID_ZIPGATEWAY, tx: tx_zipgateway.clone()});
     brocker_tx_channels.push( SubscriberChannel{id: ID_STDIO, tx: tx_stdio.clone()});
@@ -214,7 +244,7 @@ fn main() {
         }
     });
 
-     // Zip Gateway end point
+    // Zip Gateway end point
     match zipgateway_client.end_point_type
     {
         EndPointType::UdsClient => {
@@ -242,16 +272,16 @@ fn main() {
             let message = rx_stdio.recv().unwrap();
             match message.sender_id {
                 ID_HUBCORE => {
-                    println! (" Recieved from HUB: {} .", message.text)
+                    println! (" Recieved from HUB:\ntext:  {} \n data: {:X?}", message.text, message.data );
                 }
                 ID_ZIPGATEWAY => {
-                    println! (" Recieved from ZIPGATEWAY: {} .", message.text)
+                    println! ("Recieved from ZIPGATEWAY:\ntext:  {} \n data: {:X?}", message.text, message.data );
                 }
                 ID_STDIO => {
-                    println! (" This should never happen: sent from STDIO to STDIO. ")
+                    println! (" This should never happen: sent from STDIO to STDIO.");
                 }
                 _ => {
-                    println! (" This should never happen: unknown sender ")
+                    println! (" This should never happen: unknown sender ");
                 }
             }
             println! ()
@@ -264,8 +294,6 @@ fn main() {
     let std_input_thread = thread::spawn(move || {  // read standard input and send it to brocker channel
         read_stdin( ID_STDIO,  tx_brocker_clone_1);
     });
-
-    
 
     std_input_thread.join().expect("user_input_thread paniced");
 }

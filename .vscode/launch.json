@@ -32,7 +32,7 @@
             "request": "launch",
             "name": "dbg_clnt_svr",
             "program": "${workspaceFolder}/target/debug/ipc_socket_client",
-            "args": ["--uds_client", "/tmp/zipgateway.socket", "--uds_server", "/tmp/hubcore.socket"],
+            "args": ["--uds_client", "/tmp/zw.zipgateway.socket", "--uds_server", "/tmp/zw.hubcore.socket"],
             "cwd": "${workspaceFolder}",
             "sourceLanguages": [
                 "rust"
